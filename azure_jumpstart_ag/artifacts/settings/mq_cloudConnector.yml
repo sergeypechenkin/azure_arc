@@ -23,7 +23,7 @@ spec:
     pullPolicy: IfNotPresent
   protocol: v5
   bridgeInstances: 1
-  clientIdPrefix: clusterName
+  clientIdPrefix: factory-gateway-
   logLevel: debug
   remoteBrokerConnection:
     endpoint: eventGridPlaceholder:8883

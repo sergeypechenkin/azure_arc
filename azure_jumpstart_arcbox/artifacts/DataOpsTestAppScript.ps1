@@ -1,14 +1,14 @@
 $Env:ArcBoxLogsDir = "C:\ArcBox\Logs"
 
 $appNamespace = "arc"
-$sqlInstance = "capi"
+$sqlInstance = "k3s"
 
 Start-Transcript -Path $Env:ArcBoxLogsDir\DataOpsTestAppScript.log
 
-# Switch kubectl context to capi
+# Switch kubectl context to k3s
 kubectx $sqlInstance
 # Deploy the App and service
-$appCAPI = @"
+$appK3s = @"
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,7 +25,7 @@ spec:
     spec:
       containers:
       - name: dbconnecttest
-        image: azurearcjumpstart.azurecr.io/databaseconnectiontest
+        image: mcr.microsoft.com/jumpstart/arcbox/dbconnecttest:1.0.0
         volumeMounts:
         - name: secrets
           mountPath: /app/secrets
@@ -37,7 +37,7 @@ spec:
 
 "@
 Write-Header "Deploying DB Connect Test App"
-$appCAPI | kubectl apply -n $appNamespace -f -
+$appK3s | kubectl apply -n $appNamespace -f -
 
 Do {
   Write-Host "Waiting for App pod, hold tight..."

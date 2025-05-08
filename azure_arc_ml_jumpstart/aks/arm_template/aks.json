@@ -88,7 +88,7 @@
       }
     },
     "kubernetesVersion": {
-      "defaultValue": "1.28.5",
+      "defaultValue": "1.31.3",
       "type": "string",
       "metadata": {
         "description": "The version of Kubernetes."
@@ -103,7 +103,7 @@
   },
   "resources": [
     {
-      "apiVersion": "2020-03-01",
+      "apiVersion": "2024-02-02-preview",
       "type": "Microsoft.ContainerService/managedClusters",
       "location": "[parameters('location')]",
       "name": "[parameters('clusterName')]",
@@ -120,10 +120,14 @@
             "count": "[parameters('agentCount')]",
             "vmSize": "[parameters('agentVMSize')]",
             "osType": "[parameters('osType')]",
-            "storageProfile": "ManagedDisks",
             "type": "VirtualMachineScaleSets"
           }
         ],
+        "storageProfile": {
+          "diskCSIDriver": {
+            "enabled": true
+          }
+        },        
         "linuxProfile": {
           "adminUsername": "[parameters('linuxAdminUsername')]",
           "ssh": {
@@ -133,6 +137,10 @@
               }
             ]
           }
+        },
+        "autoUpgradeProfile": {
+          "upgradeChannel": "stable",
+          "nodeOSUpgradeChannel": "NodeImage"
         },
         "servicePrincipalProfile": {
           "clientId": "[parameters('spnClientId')]",

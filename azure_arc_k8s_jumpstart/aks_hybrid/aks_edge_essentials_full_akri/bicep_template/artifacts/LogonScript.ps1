@@ -20,6 +20,7 @@ $hypervVMPassword = "JS123!!"
 $kubernetesDistribution = $env:kubernetesDistribution
 $templateBaseUrl = $env:templateBaseUrl
 $aksEEReleasesUrl = "https://api.github.com/repos/Azure/AKS-Edge/releases"
+$AKSEEPinnedSchemaVersion = $Env:AKSEEPinnedSchemaVersion
 
 Write-Header "Executing LogonScript.ps1"
 
@@ -121,7 +122,7 @@ New-NetIPAddress -IPAddress "172.20.1.1" -PrefixLength 24 -InterfaceIndex $ifInd
 New-NetNat -Name "AKS-Int" -InternalIPInterfaceAddressPrefix "172.20.1.0/24"
 
 ############################################
-# Deploying the nested L1 virtual machines 
+# Deploying the nested L1 virtual machines
 ############################################
 Write-Host "INFO: Fetching Windows 11 IoT Enterprise VM images from Azure storage. This may take a few minutes." -ForegroundColor Green
 azcopy cp $vhdxUri "C:\VHDX\base.vhdx" --recursive=true --check-length=false --log-level=ERROR
@@ -178,7 +179,7 @@ foreach ($site in $SiteConfig.GetEnumerator()) {
         # Create diff disks for each site host
         Write-Host "INFO: Creating differencing disk for site $($site.Name)" -ForegroundColor Gray
         $vhd = New-VHD -ParentPath $vhdxPath -Path "C:\VHDX\$($site.Name)DiffDisk.vhdx" -Differencing
-        
+
         # Create a new virtual machine and attach the existing virtual hard disk
         Write-Host "INFO: Creating and configuring $($site.Name) virtual machine." -ForegroundColor Gray
         New-VM -Name $site.Name `
@@ -187,7 +188,7 @@ foreach ($site in $SiteConfig.GetEnumerator()) {
             -VHDPath $vhd.Path `
             -Generation 2 `
             -Switch "AKS-Int"
-        
+
         # Set up the virtual machine before coping all AKS Edge Essentials automation files
         Set-VMProcessor -VMName $site.Name `
             -Count 4 `
@@ -195,7 +196,7 @@ foreach ($site in $SiteConfig.GetEnumerator()) {
 
         Get-VMNetworkAdapter -VMName $site.Name | Set-VMNetworkAdapter -MacAddressSpoofing On
         Enable-VMIntegrationService -VMName $site.Name -Name "Guest Service Interface"
-  
+
         # Start the virtual machine
         Start-VM -Name $site.Name
     }
@@ -204,7 +205,7 @@ foreach ($site in $SiteConfig.GetEnumerator()) {
 Start-Sleep -Seconds 20
 
 ########################################################################
-# Prepare L1 nested virtual machines for AKS Edge Essentials bootstrap 
+# Prepare L1 nested virtual machines for AKS Edge Essentials bootstrap
 ########################################################################
 foreach ($site in $SiteConfig.GetEnumerator()) {
     if ($site.Value.Type -eq "AKSEE") {
@@ -216,7 +217,7 @@ foreach ($site in $SiteConfig.GetEnumerator()) {
         }
     }
 }
-# Create an array with VM names    
+# Create an array with VM names
 $VMnames = (Get-VM).Name
 
 Start-Sleep -Seconds 60 # Give some time after restart
@@ -227,13 +228,12 @@ Invoke-Command -VMName $VMnames -Credential $Credentials -ScriptBlock {
     $hostname = hostname
     $ProgressPreference = "SilentlyContinue"
     ###########################################
-    # Preparing environment folders structure 
+    # Preparing environment folders structure
     ###########################################
     Write-Host "INFO: Preparing folder structure on $hostname." -ForegroundColor Gray
     $deploymentFolder = "C:\Deployment" # Deployment folder is already pre-created in the VHD image
     $logsFolder = "$deploymentFolder\Logs"
     $kubeFolder = "$env:USERPROFILE\.kube"
-
     # Set up an array of folders
     $folders = @($logsFolder, $kubeFolder)
 
@@ -252,9 +252,10 @@ Invoke-Command -VMName $VMnames -Credential $Credentials -ScriptBlock {
     $logsFolder = "$deploymentFolder\Logs"
     Start-Transcript -Path $logsFolder\AKSEEBootstrap.log
     $SiteConfig = $using:SiteConfig
+    $AKSEEPinnedSchemaVersion = $using:AKSEEPinnedSchemaVersion
 
     ##########################################
-    # Deploying AKS Edge Essentials clusters 
+    # Deploying AKS Edge Essentials clusters
     ##########################################
     $deploymentFolder = "C:\Deployment" # Deployment folder is already pre-created in the VHD image
     $logsFolder = "$deploymentFolder\Logs"
@@ -279,7 +280,7 @@ Invoke-Command -VMName $VMnames -Credential $Credentials -ScriptBlock {
         Start-Sleep -Seconds 5
         $timeElapsed = $timeElapsed + 10
     } until ((Test-Connection bing.com -Count 1 -ErrorAction SilentlyContinue) -or ($timeElapsed -eq 60))
-      
+
     # Fetching latest AKS Edge Essentials msi file
     Write-Host "INFO: Fetching latest AKS Edge Essentials install file on $hostname." -ForegroundColor Gray
 
@@ -303,19 +304,21 @@ Invoke-Command -VMName $VMnames -Credential $Credentials -ScriptBlock {
 }
 
 Write-Host "Fetching the latest AKS Edge Essentials release."
-$latestReleaseTag = (Invoke-WebRequest $aksEEReleasesUrl | ConvertFrom-Json)[0].tag_name
-
-$AKSEEReleaseDownloadUrl = "https://github.com/Azure/AKS-Edge/archive/refs/tags/$latestReleaseTag.zip"
-$output = Join-Path "C:\temp" "$latestReleaseTag.zip"
-Invoke-WebRequest $AKSEEReleaseDownloadUrl -OutFile $output
-Expand-Archive $output -DestinationPath "C:\temp" -Force
-$AKSEEReleaseConfigFilePath = "C:\temp\AKS-Edge-$latestReleaseTag\tools\aksedge-config.json"
-$jsonContent = Get-Content -Raw -Path $AKSEEReleaseConfigFilePath | ConvertFrom-Json
-$schemaVersion = $jsonContent.SchemaVersion
-# Clean up the downloaded release files
-Remove-Item -Path $output -Force
-Remove-Item -Path "C:\temp\AKS-Edge-$latestReleaseTag" -Force -Recurse
-
+if ($AKSEEPinnedSchemaVersion -ne "useLatest") {
+    $SchemaVersion = $AKSEEPinnedSchemaVersion
+}else{
+    $latestReleaseTag = (Invoke-WebRequest $aksEEReleasesUrl | ConvertFrom-Json)[0].tag_name
+    $AKSEEReleaseDownloadUrl = "https://github.com/Azure/AKS-Edge/archive/refs/tags/$latestReleaseTag.zip"
+    $output = Join-Path "C:\temp" "$latestReleaseTag.zip"
+    Invoke-WebRequest $AKSEEReleaseDownloadUrl -OutFile $output
+    Expand-Archive $output -DestinationPath "C:\temp" -Force
+    $AKSEEReleaseConfigFilePath = "C:\temp\AKS-Edge-$latestReleaseTag\tools\aksedge-config.json"
+    $jsonContent = Get-Content -Raw -Path $AKSEEReleaseConfigFilePath | ConvertFrom-Json
+    $schemaVersion = $jsonContent.SchemaVersion
+    # Clean up the downloaded release files
+    Remove-Item -Path $output -Force
+    Remove-Item -Path "C:\temp\AKS-Edge-$latestReleaseTag" -Force -Recurse
+}
 
 ###############################################################################
 # Setting up replacment parameters for AKS Edge Essentials config json file
@@ -361,7 +364,7 @@ Write-Host
 Write-Host "[$(Get-Date -Format t)] INFO: Installing AKS Edge Essentials" -ForegroundColor DarkGreen
 $Session = New-PSSession -VMName Node1 -Credential $Credentials
 Write-Host "INFO: Rebooting Node1." -ForegroundColor Gray
-Invoke-Command -Session $Session -ScriptBlock { 
+Invoke-Command -Session $Session -ScriptBlock {
     $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Deployment\AKSEEBootstrap.ps1"
     $Trigger = New-ScheduledTaskTrigger -AtStartup
     Register-ScheduledTask -TaskName "Startup Scan" -Action $Action -Trigger $Trigger -User $env:USERNAME -Password $using:hypervVMPassword -RunLevel Highest
@@ -380,7 +383,7 @@ $elapsedTime = Measure-Command {
     $user = "Administrator"
     [securestring]$secStringPassword = ConvertTo-SecureString 'JS123!!' -AsPlainText -Force
     $Credential = New-Object System.Management.Automation.PSCredential($user, $secStringPassword)
-    while (!(Invoke-Command -VMName "Node1" -Credential $Credential -ScriptBlock { Test-Path $using:path })) { 
+    while (!(Invoke-Command -VMName "Node1" -Credential $Credential -ScriptBlock { Test-Path $using:path })) {
         Start-Sleep 30
         Write-Host "INFO: Waiting for AKS Edge Essentials kubeconfig to be available on Node1." -ForegroundColor Gray
     }
@@ -462,7 +465,7 @@ Invoke-Command -VMName "Node2" -Credential $Credentials -ScriptBlock {
 
 $Session = New-PSSession -VMName Node2 -Credential $Credentials
 Write-Host "INFO: Rebooting Node2." -ForegroundColor Gray
-Invoke-Command -Session $Session -ScriptBlock { 
+Invoke-Command -Session $Session -ScriptBlock {
     $Action = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-ExecutionPolicy Bypass -File C:\Deployment\AKSEEBootstrap.ps1"
     $Trigger = New-ScheduledTaskTrigger -AtStartup
     Register-ScheduledTask -TaskName "Startup Scan" -Action $Action -Trigger $Trigger -User $env:USERNAME -Password $using:hypervVMPassword -RunLevel Highest
@@ -486,9 +489,10 @@ Invoke-Command -VMName "Node1" -Credential $Credentials -ScriptBlock {
     $hostname = hostname
     $ProgressPreference = "SilentlyContinue"
     Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force
-    Install-Module Az.Resources -Repository PSGallery -Force -AllowClobber -ErrorAction Stop  
-    Install-Module Az.Accounts -Repository PSGallery -Force -AllowClobber -ErrorAction Stop 
-    Install-Module Az.ConnectedKubernetes -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+    Install-Module Az.Resources -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+    Install-Module Az.Accounts -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+    # Temporary pin-down due to regression: https://github.com/microsoft/azure_arc/pull/2762
+    Install-Module Az.ConnectedKubernetes -Repository PSGallery -Force -AllowClobber -ErrorAction Stop -RequiredVersion 0.10.3
 
     # Connect to Arc
     $deploymentPath = "C:\Deployment\config.json"
@@ -563,22 +567,22 @@ Invoke-Command -VMName $VMnames -Credential $Credentials -ScriptBlock {
 
 # Changing to Client VM wallpaper
 $imgPath = "C:\Temp\wallpaper.png"
-$code = @' 
-using System.Runtime.InteropServices; 
-namespace Win32{ 
-    
-     public class Wallpaper{ 
-        [DllImport("user32.dll", CharSet=CharSet.Auto)] 
-         static extern int SystemParametersInfo (int uAction , int uParam , string lpvParam , int fuWinIni) ; 
-         
-         public static void SetWallpaper(string thePath){ 
-            SystemParametersInfo(20,0,thePath,3); 
+$code = @'
+using System.Runtime.InteropServices;
+namespace Win32{
+
+     public class Wallpaper{
+        [DllImport("user32.dll", CharSet=CharSet.Auto)]
+         static extern int SystemParametersInfo (int uAction , int uParam , string lpvParam , int fuWinIni) ;
+
+         public static void SetWallpaper(string thePath){
+            SystemParametersInfo(20,0,thePath,3);
          }
     }
- } 
+ }
 '@
 
-add-type $code 
+add-type $code
 [Win32.Wallpaper]::SetWallpaper($imgPath)
 
 # Kill the open PowerShell monitoring kubectl get pods
@@ -629,7 +633,7 @@ New-Item -Path $videoDir -ItemType directory -Force
 Invoke-WebRequest ($templateBaseUrl + "artifacts/video/video-streaming.yaml") -OutFile $videoDir\video-streaming.yaml
 Invoke-WebRequest ($templateBaseUrl + "artifacts/video/akri-video-streaming-app.yaml") -OutFile $videoDir\akri-video-streaming-app.yaml
 kubectl apply -f $videoDir\akri-video-streaming-app.yaml
-kubectl apply -f $videoDir\video-streaming.yaml  
+kubectl apply -f $videoDir\video-streaming.yaml
 
 # Removing the LogonScript Scheduled Task so it won't run on next reboot
 Unregister-ScheduledTask -TaskName "LogonScript" -Confirm:$false

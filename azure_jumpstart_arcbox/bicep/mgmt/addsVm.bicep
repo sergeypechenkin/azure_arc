@@ -2,7 +2,7 @@
 param addsDomainName string = 'jumpstart.local'
 
 @description('The name of your Virtual Machine')
-param clientVMName string = 'ArcBox-ADDS'
+param clientVMName string = '${namingPrefix}-ADDS'
 
 @description('Username for the Virtual Machine')
 param windowsAdminUsername string = 'arcdemo'
@@ -11,10 +11,10 @@ param windowsAdminUsername string = 'arcdemo'
 @minLength(12)
 @maxLength(123)
 @secure()
-param windowsAdminPassword string = 'ArcPassword123!!'
+param windowsAdminPassword string
 
 @description('The Windows version for the VM. This will pick a fully patched image of this given Windows version')
-param windowsOSVersion string = '2022-datacenter-g2'
+param windowsOSVersion string = '2025-datacenter-g2'
 
 @description('Location for all resources')
 param azureLocation string = resourceGroup().location
@@ -28,11 +28,15 @@ param deployBastion bool = false
 @description('Base URL for ARM template')
 param templateBaseUrl string = ''
 
+@maxLength(7)
+@description('The naming prefix for the nested virtual machines. Example: ArcBox-Win2k19')
+param namingPrefix string = 'ArcBox'
+
 var networkInterfaceName = '${clientVMName}-NIC'
-var virtualNetworkName = 'ArcBox-VNet'
-var dcSubnetName = 'ArcBox-DC-Subnet'
+var virtualNetworkName = '${namingPrefix}-VNet'
+var dcSubnetName = '${namingPrefix}-DC-Subnet'
 var addsPrivateIPAddress = '10.16.2.100'
-var bastionName = 'ArcBox-Bastion'
+var bastionName = '${namingPrefix}-Bastion'
 var osDiskType = 'Premium_LRS'
 var subnetRef = resourceId('Microsoft.Network/virtualNetworks/subnets', virtualNetworkName, dcSubnetName)
 var networkInterfaceRef = networkInterface.id
@@ -41,7 +45,7 @@ var PublicIPNoBastion = {
   id: publicIpAddress.id
 }
 
-resource networkInterface 'Microsoft.Network/networkInterfaces@2022-01-01' = {
+resource networkInterface 'Microsoft.Network/networkInterfaces@2024-05-01' = {
   name: networkInterfaceName
   location: azureLocation
   properties: {
@@ -54,14 +58,14 @@ resource networkInterface 'Microsoft.Network/networkInterfaces@2022-01-01' = {
           }
           privateIPAllocationMethod: 'Static'
           privateIPAddress: addsPrivateIPAddress
-          publicIPAddress: ((!deployBastion) ? PublicIPNoBastion : json('null'))
+          publicIPAddress: ((!deployBastion) ? PublicIPNoBastion : null)
         }
       }
     ]
   }
 }
 
-resource publicIpAddress 'Microsoft.Network/publicIpAddresses@2022-01-01' = if (!deployBastion) {
+resource publicIpAddress 'Microsoft.Network/publicIPAddresses@2024-05-01' = if (!deployBastion) {
   name: publicIpAddressName
   location: azureLocation
   properties: {
@@ -75,7 +79,7 @@ resource publicIpAddress 'Microsoft.Network/publicIpAddresses@2022-01-01' = if (
   }
 }
 
-resource clientVM 'Microsoft.Compute/virtualMachines@2022-03-01' = {
+resource clientVM 'Microsoft.Compute/virtualMachines@2024-07-01' = {
   name: clientVMName
   location: azureLocation
   properties: {
@@ -116,9 +120,12 @@ resource clientVM 'Microsoft.Compute/virtualMachines@2022-03-01' = {
       }
     }
   }
+  identity: {
+    type: 'SystemAssigned'
+  }
 }
 
-resource vmName_DeployADDS 'Microsoft.Compute/virtualMachines/extensions@2022-03-01' = {
+resource vmName_DeployADDS 'Microsoft.Compute/virtualMachines/extensions@2024-07-01' = {
   parent: clientVM
   name: 'DeployADDS'
   location: azureLocation
@@ -127,12 +134,32 @@ resource vmName_DeployADDS 'Microsoft.Compute/virtualMachines/extensions@2022-03
     type: 'CustomScriptExtension'
     typeHandlerVersion: '1.10'
     autoUpgradeMinorVersion: true
-    settings: {
+    protectedSettings: {
       fileUris: [
         uri(templateBaseUrl, 'artifacts/SetupADDS.ps1')
       ]
-      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File SetupADDS.ps1 -domainName ${addsDomainName} -domainAdminUsername ${windowsAdminUsername} -domainAdminPassword ${windowsAdminPassword} -templateBaseUrl ${templateBaseUrl}'
+      commandToExecute: 'powershell.exe -ExecutionPolicy Bypass -File SetupADDS.ps1 -domainName ${addsDomainName} -domainAdminUsername ${windowsAdminUsername} -templateBaseUrl ${templateBaseUrl}'
     }
+  }
+}
+
+// Role assignment for Reader
+resource vmReaderRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(clientVM.id, 'reader')
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', 'acdd72a7-3385-48ef-bd42-f606fba81ae7')
+    principalId: clientVM.identity.principalId
+  }
+}
+
+// Role assignment for Key Vault Secret Reader
+resource vmKeyVaultSecretReaderRoleAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(clientVM.id, 'keyVaultSecretReader')
+  scope: resourceGroup()
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', '4633458b-17de-408a-b874-0445c86b69e6')
+    principalId: clientVM.identity.principalId
   }
 }
 

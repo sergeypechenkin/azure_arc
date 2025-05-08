@@ -3,7 +3,7 @@ Start-Transcript -Path C:\Temp\LogonScript.log
 Set-ExecutionPolicy Bypass -Scope Process -Force
 
 # Parameters
-$schemaVersionAksEdgeConfig = "1.9"
+$schemaVersionAksEdgeConfig = "1.13"
 $versionAksEdgeConfig = "1.0"
 $guid = ([System.Guid]::NewGuid()).ToString().subString(0,5).ToLower()
 $clusterName = "$Env:resourceGroup-$guid"
@@ -95,7 +95,7 @@ az account set --subscription $Env:subscriptionId
 az config set extension.use_dynamic_install=yes_without_prompt
 Write-Host "`n"
 Write-Host "Installing Azure CLI extensions"
-# az extension add --name connectedk8s --version 1.3.17
+# az extension add --name connectedk8s --version 1.9.3
 az extension add --name k8s-extension
 Write-Host "`n"
 

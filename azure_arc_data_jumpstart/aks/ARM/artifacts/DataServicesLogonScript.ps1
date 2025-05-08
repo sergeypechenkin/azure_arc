@@ -14,7 +14,7 @@ az config set extension.use_dynamic_install=yes_without_prompt
 # Installing Azure CLI extensions
 Write-Host "`n"
 Write-Host "Installing Azure CLI extensions"
-az extension add --name connectedk8s --version 1.3.17
+az extension add --name connectedk8s --version 1.9.3
 az extension add --name arcdata
 az extension add --name k8s-extension
 Write-Host "`n"
@@ -81,6 +81,20 @@ Write-Host "`n"
 Write-Host "Onboarding the cluster as an Azure Arc-enabled Kubernetes cluster"
 Write-Host "`n"
 
+# Copy kubectl.exe file in the user directory
+if (Test-Path "C:\ProgramData\chocolatey\lib\kubernetes-cli\tools\kubernetes\client\bin\kubectl.exe") {
+    $destinationPath = "C:\Users\$Env:adminUsername\.azure\kubectl-client"
+    if (-not (Test-Path $destinationPath)) {
+        New-Item -Path $destinationPath -ItemType Directory -Force
+    }
+    Copy-Item -Path "C:\ProgramData\chocolatey\lib\kubernetes-cli\tools\kubernetes\client\bin\kubectl.exe" -Destination "$destinationPath\kubectl.exe" -Force
+}
+else {
+    Write-Host "kubectl.exe not found at the specified path. Rerun logon script after kubectl installation."
+    Exit
+}
+
+
 # Localize kubeconfig
 $Env:KUBECONTEXT = kubectl config current-context
 $Env:KUBECONFIG = "C:\Users\$Env:adminUsername\.kube\config"
@@ -116,7 +130,7 @@ az k8s-extension create --name arc-data-services `
                         --resource-group $Env:resourceGroup `
                         --auto-upgrade false `
                         --scope cluster `
-                        --version 1.30.0 `
+                        --version 1.38.0 `
                         --release-namespace arc `
                         --config Microsoft.CustomLocation.ServiceAccount=sa-arc-bootstrapper
 
